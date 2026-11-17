@@ -1,0 +1,132 @@
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/*
+ * This file is part of the LibreOffice project.
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * This file incorporates work covered by the following license notice:
+ *
+ *   Licensed to the Apache Software Foundation (ASF) under one or more
+ *   contributor license agreements. See the NOTICE file distributed
+ *   with this work for additional information regarding copyright
+ *   ownership. The ASF licenses this file to you under the Apache
+ *   License, Version 2.0 (the "License"); you may not use this file
+ *   except in compliance with the License. You may obtain a copy of
+ *   the License at http://www.apache.org/licenses/LICENSE-2.0 .
+ */
+
+#include <sal/config.h>
+
+#include <memory>
+
+#include <basegfx/matrix/b2dhommatrix.hxx>
+#include <basegfx/range/b2irange.hxx>
+#include <comphelper/diagnose_ex.hxx>
+
+#include "dx_bitmap.hxx"
+#include "dx_graphicsprovider.hxx"
+#include "dx_impltools.hxx"
+
+using namespace ::com::sun::star;
+
+namespace dxcanvas
+{
+
+    // DXBitmap::DXBitmap
+
+
+    DXBitmap::DXBitmap( const BitmapSharedPtr& rBitmap,
+                        bool                   bWithAlpha ) :
+        mpGdiPlusUser( GDIPlusUser::createInstance() ),
+        maSize(rBitmap->GetWidth(),rBitmap->GetHeight()),
+        mpBitmap(rBitmap),
+        mpGraphics(dxcanvastools::createGraphicsFromBitmap(mpBitmap)),
+        mbAlpha(bWithAlpha)
+    {
+    }
+
+    DXBitmap::DXBitmap( const ::basegfx::B2ISize& rSize,
+                        bool bWithAlpha ) :
+        mpGdiPlusUser( GDIPlusUser::createInstance() ),
+        maSize(rSize),
+        mpBitmap(),
+        mpGraphics(),
+        mbAlpha(bWithAlpha)
+    {
+        // create container for pixel data
+        if(mbAlpha)
+        {
+            mpBitmap = std::make_shared<Gdiplus::Bitmap>(
+                    maSize.getWidth(),
+                    maSize.getHeight(),
+                    PixelFormat32bppARGB);
+        }
+        else
+        {
+            mpBitmap = std::make_shared<Gdiplus::Bitmap>(
+                    maSize.getWidth(),
+                    maSize.getHeight(),
+                    PixelFormat24bppRGB);
+        }
+
+        mpGraphics = dxcanvastools::createGraphicsFromBitmap(mpBitmap);
+    }
+
+    BitmapSharedPtr DXBitmap::getBitmap() const
+    {
+        return mpBitmap;
+    }
+
+    GraphicsSharedPtr DXBitmap::getGraphics()
+    {
+        return mpGraphics;
+    }
+
+    ::basegfx::B2ISize DXBitmap::getSize() const
+    {
+        return maSize;
+    }
+
+    bool DXBitmap::hasAlpha() const
+    {
+        return mbAlpha;
+    }
+
+    uno::Sequence< sal_Int8 > DXBitmap::getData( rendering::IntegerBitmapLayout&     /*bitmapLayout*/,
+                                                 const geometry::IntegerRectangle2D& rect )
+    {
+        uno::Sequence< sal_Int8 > aRes( (rect.X2-rect.X1)*(rect.Y2-rect.Y1)*4 ); // TODO(F1): Be format-agnostic here
+
+        const Gdiplus::Rect aRect( dxcanvastools::gdiPlusRectFromIntegerRectangle2D( rect ) );
+
+        Gdiplus::BitmapData aBmpData;
+        aBmpData.Width       = rect.X2-rect.X1;
+        aBmpData.Height      = rect.Y2-rect.Y1;
+        aBmpData.Stride      = 4*aBmpData.Width;
+        aBmpData.PixelFormat = PixelFormat32bppARGB;
+        aBmpData.Scan0       = aRes.getArray();
+
+        // TODO(F1): Support more pixel formats natively
+
+        // read data from bitmap
+        if( Gdiplus::Ok != mpBitmap->LockBits( &aRect,
+                                                      Gdiplus::ImageLockModeRead | Gdiplus::ImageLockModeUserInputBuf,
+                                                      PixelFormat32bppARGB, // TODO(F1): Adapt to
+                                                      // Graphics native
+                                                      // format/change
+                                                      // getMemoryLayout
+                                                      &aBmpData ) )
+        {
+            // failed to lock, bail out
+            return uno::Sequence< sal_Int8 >();
+        }
+
+        mpBitmap->UnlockBits( &aBmpData );
+
+        return aRes;
+    }
+}
+
+/* vim:set shiftwidth=4 softtabstop=4 expandtab: */
